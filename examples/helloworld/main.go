@@ -151,9 +151,11 @@ func main() {
 	}
 	fmt.Fprintf(os.Stdout, "node address: %s\n", nodeAddr)
 	// change the log verbosity
+	logger.GetLogger("dragonboat").SetLevel(logger.WARNING)
+	logger.GetLogger("logdb").SetLevel(logger.ERROR)
 	logger.GetLogger("raft").SetLevel(logger.ERROR)
 	logger.GetLogger("rsm").SetLevel(logger.WARNING)
-	logger.GetLogger("transport").SetLevel(logger.WARNING)
+	logger.GetLogger("transport").SetLevel(logger.CRITICAL)
 	logger.GetLogger("grpc").SetLevel(logger.WARNING)
 	// config for raft node
 	// See GoDoc for all available options

@@ -1250,7 +1250,7 @@ func (n *node) recordMessage(m pb.Message) {
 		n.qs.record(pb.ReadIndex)
 	} else {
 		if m.Type != pb.Heartbeat && m.Type != pb.HeartbeatResp {
-			plog.Infof("[node] Recv message {%s}, leaderID: %d", m.String(), n.leaderID)
+			plog.Warningf("[node] Recv message {%s}, leaderID: %d", m.String(), n.leaderID)
 		}
 		n.qs.record(m.Type)
 	}

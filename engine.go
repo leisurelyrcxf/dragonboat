@@ -1324,6 +1324,9 @@ func (e *engine) processSteps(workerID uint64,
 		return err
 	}
 	for _, ud := range nodeUpdates {
+		if len(ud.EntriesToSave) > 0 {
+			plog.Errorf("persisted %v", ud.EntriesToSave)
+		}
 		node := nodes[ud.ClusterID]
 		if err := node.processRaftUpdate(ud); err != nil {
 			return err

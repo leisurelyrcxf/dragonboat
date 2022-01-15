@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/lni/goutils/syncutil"
@@ -179,6 +180,9 @@ func (s *ShardedDB) GetLogDBThreadContext() IContext {
 func (s *ShardedDB) SaveRaftStateCtx(updates []pb.Update, ctx IContext) error {
 	if len(updates) == 0 {
 		return nil
+	}
+	if updates[0].NodeID == 1 {
+		time.Sleep(time.Millisecond*10)
 	}
 	p := s.getParititionID(updates)
 	return errors.WithStack(s.shards[p].saveRaftState(updates, ctx))
