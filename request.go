@@ -295,11 +295,14 @@ type RequestState struct {
 	//
 	// Deprecated: CompletedC has been deprecated. Use ResultC() or AppliedC()
 	// instead.
-	CompletedC   chan RequestResult
+	CompletedC chan RequestResult
+
 	node         *node
 	pool         *sync.Pool
 	notifyCommit bool
 	testErr      chan struct{}
+	onCommitted  func()
+	onApplied    func()
 }
 
 // AppliedC returns a channel of RequestResult for delivering request result.
@@ -386,6 +389,10 @@ func (r *RequestState) committed() {
 	if !r.notifyCommit {
 		plog.Panicf("notify commit not allowed")
 	}
+	if r.onCommitted != nil {
+		r.onCommitted()
+		return
+	}
 	if r.committedC == nil {
 		plog.Panicf("committedC is nil")
 	}
@@ -443,10 +450,16 @@ func (r *RequestState) reuse(notifyCommit bool) {
 	if r.aggrC != nil {
 		plog.Panicf("aggrC not nil")
 	}
-	if len(r.CompletedC) > 0 || r.CompletedC == nil {
-		r.CompletedC = make(chan RequestResult, 1)
+
+	if r.onApplied == nil {
+		if len(r.CompletedC) > 0 || r.CompletedC == nil {
+			r.CompletedC = make(chan RequestResult, 1)
+		}
+	} else {
+		r.CompletedC = nil
 	}
-	if notifyCommit {
+
+	if r.onCommitted == nil && notifyCommit {
 		if len(r.committedC) > 0 || r.committedC == nil {
 			r.committedC = make(chan RequestResult, 1)
 		}
@@ -991,9 +1004,14 @@ func newPendingProposal(cfg config.Config,
 
 func (p *pendingProposal) propose(session *client.Session,
 	cmd []byte, timeoutTick uint64) (*RequestState, error) {
+	return p.proposeEx(session, cmd, nil, nil, timeoutTick)
+}
+
+func (p *pendingProposal) proposeEx(session *client.Session,
+	cmd []byte, onCommitted func(), onApplied func(), timeoutTick uint64) (*RequestState, error) {
 	key := p.nextKey(session.ClientID)
 	pp := p.shards[key%p.ps]
-	return pp.propose(session, cmd, key, timeoutTick)
+	return pp.propose(session, cmd, onCommitted, onApplied, key, timeoutTick)
 }
 
 func (p *pendingProposal) close() {
@@ -1051,7 +1069,7 @@ func newPendingProposalShard(cfg config.Config,
 }
 
 func (p *proposalShard) propose(session *client.Session,
-	cmd []byte, key uint64, timeoutTick uint64) (*RequestState, error) {
+	cmd []byte, onCommitted, onApplied func(), key uint64, timeoutTick uint64) (*RequestState, error) {
 	if timeoutTick == 0 {
 		return nil, ErrTimeoutTooSmall
 	}
@@ -1071,12 +1089,14 @@ func (p *proposalShard) propose(session *client.Session,
 		entry.Cmd = preparePayload(p.cfg.EntryCompressionType, cmd)
 	}
 	req := p.pool.Get().(*RequestState)
-	req.reuse(p.notifyCommit)
 	req.clientID = session.ClientID
 	req.seriesID = session.SeriesID
 	req.key = entry.Key
 	req.deadline = p.getTick() + timeoutTick
 	req.notifyCommit = p.notifyCommit
+	req.onCommitted = onCommitted
+	req.onApplied = onApplied
+	req.reuse(p.notifyCommit) // NOTE: the order can't be changed.
 
 	p.mu.Lock()
 	p.pending[entry.Key] = req

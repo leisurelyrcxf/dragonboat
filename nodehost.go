@@ -1680,9 +1680,11 @@ func (nh *NodeHost) createPools() {
 		p := &sync.Pool{}
 		p.New = func() interface{} {
 			obj := &RequestState{}
-			obj.CompletedC = make(chan RequestResult, 1)
+			if !nh.nhConfig.NotifyApplyUsingCallback {
+				obj.CompletedC = make(chan RequestResult, 1)
+			}
 			obj.pool = p
-			if nh.nhConfig.NotifyCommit {
+			if nh.nhConfig.NotifyCommit && !nh.nhConfig.NotifyCommitUsingCallback {
 				obj.committedC = make(chan RequestResult, 1)
 			}
 			return obj
@@ -2025,6 +2027,11 @@ type INodeUser interface {
 	// in NodeHost.
 	Propose(s *client.Session,
 		cmd []byte, timeout time.Duration) (*RequestState, error)
+	// ProposeEx async propose a proposal on the Raft cluster. It passes a
+	// callback 
+	ProposeEx(s *client.Session,
+		cmd []byte, onCommitted func(), onApplied func(),
+		timeout time.Duration) (*RequestState, error)
 	// ReadIndex starts the asynchronous ReadIndex protocol used for linearizable
 	// reads on the Raft cluster represented by the INodeUser instance. Its
 	// semantics is the same as the ReadIndex() method in NodeHost.
@@ -2050,6 +2057,14 @@ func (nu *nodeUser) NodeID() uint64 {
 func (nu *nodeUser) Propose(s *client.Session,
 	cmd []byte, timeout time.Duration) (*RequestState, error) {
 	req, err := nu.node.propose(s, cmd, nu.nh.getTimeoutTick(timeout))
+	nu.setStepReady(s.ClusterID)
+	return req, err
+}
+
+func (nu *nodeUser) ProposeEx(s *client.Session,
+	cmd []byte, onCommitted func(), onApplied func(),
+	timeout time.Duration) (*RequestState, error) {
+	req, err := nu.node.proposeEx(s, cmd, onCommitted, onApplied, nu.nh.getTimeoutTick(timeout))
 	nu.setStepReady(s.ClusterID)
 	return req, err
 }

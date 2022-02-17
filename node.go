@@ -395,6 +395,11 @@ func (n *node) payloadTooBig(sz int) bool {
 
 func (n *node) propose(session *client.Session,
 	cmd []byte, timeout uint64) (*RequestState, error) {
+	return n.proposeEx(session, cmd, nil, nil, timeout)
+}
+
+func (n *node) proposeEx(session *client.Session,
+	cmd []byte, onCommitted func(), onApplied func(), timeout uint64) (*RequestState, error) {
 	if !n.initialized() {
 		return nil, ErrClusterNotReady
 	}
@@ -407,7 +412,7 @@ func (n *node) propose(session *client.Session,
 	if n.payloadTooBig(len(cmd)) {
 		return nil, ErrPayloadTooBig
 	}
-	return n.pendingProposals.propose(session, cmd, timeout)
+	return n.pendingProposals.proposeEx(session, cmd, onCommitted, onApplied, timeout)
 }
 
 func (n *node) read(timeout uint64) (*RequestState, error) {

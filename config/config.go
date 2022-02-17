@@ -359,6 +359,12 @@ type NodeHostConfig struct {
 	// commits are not notified, clients are only notified when their proposals
 	// are both committed and applied.
 	NotifyCommit bool
+	// NotifyCommitUsingCallback specified whether to use callback to notify
+	// committing.
+	NotifyCommitUsingCallback bool
+	// NotifyApplyUsingCallback specified whether to use callback to notify applying
+	NotifyApplyUsingCallback bool
+
 	// Gossip contains configurations for the gossip service. When the
 	// AddressByNodeHostID field is set to true, each NodeHost instance will use
 	// an internal gossip service to exchange knowledges of known NodeHost
