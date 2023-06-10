@@ -312,6 +312,7 @@ type RequestState struct {
 	pool         *sync.Pool
 	notifyCommit bool
 	testErr      chan struct{}
+	onCommit     func() (continueApply bool)
 }
 
 // AppliedC returns a channel of RequestResult for delivering request result.
@@ -410,9 +411,13 @@ func (r *RequestState) ResultC() chan RequestResult {
 	return r.aggrC
 }
 
-func (r *RequestState) committed() {
+// committed return whether we should continue applying.
+func (r *RequestState) committed() (continueApply bool) {
 	if !r.notifyCommit {
 		plog.Panicf("notify commit not allowed")
+	}
+	if r.onCommit != nil {
+		return r.onCommit()
 	}
 	if r.committedC == nil {
 		plog.Panicf("committedC is nil")
@@ -422,6 +427,7 @@ func (r *RequestState) committed() {
 	default:
 		plog.Panicf("RequestState.committedC is full")
 	}
+	return true
 }
 
 func (r *RequestState) timeout() {
@@ -1015,9 +1021,14 @@ func newPendingProposal(cfg config.Config,
 
 func (p *pendingProposal) propose(session *client.Session,
 	cmd []byte, timeoutTick uint64) (*RequestState, error) {
+	return p.proposeEx(session, cmd, nil, timeoutTick)
+}
+
+func (p *pendingProposal) proposeEx(session *client.Session,
+	cmd []byte, onCommit func() (continueApply bool), timeoutTick uint64) (*RequestState, error) {
 	key := p.nextKey(session.ClientID)
 	pp := p.shards[key%p.ps]
-	return pp.propose(session, cmd, key, timeoutTick)
+	return pp.propose(session, cmd, onCommit, key, timeoutTick)
 }
 
 func (p *pendingProposal) close() {
@@ -1027,9 +1038,9 @@ func (p *pendingProposal) close() {
 }
 
 func (p *pendingProposal) committed(clientID uint64,
-	seriesID uint64, key uint64) {
+	seriesID uint64, key uint64) (continueApply bool) {
 	pp := p.shards[key%p.ps]
-	pp.committed(clientID, seriesID, key)
+	return pp.committed(clientID, seriesID, key)
 }
 
 func (p *pendingProposal) dropped(clientID uint64,
@@ -1075,7 +1086,7 @@ func newPendingProposalShard(cfg config.Config,
 }
 
 func (p *proposalShard) propose(session *client.Session,
-	cmd []byte, key uint64, timeoutTick uint64) (*RequestState, error) {
+	cmd []byte, onCommit func() bool, key uint64, timeoutTick uint64) (*RequestState, error) {
 	if timeoutTick == 0 {
 		return nil, ErrTimeoutTooSmall
 	}
@@ -1101,6 +1112,7 @@ func (p *proposalShard) propose(session *client.Session,
 	req.key = entry.Key
 	req.deadline = p.getTick() + timeoutTick
 	req.notifyCommit = p.notifyCommit
+	req.onCommit = onCommit
 
 	p.mu.Lock()
 	p.pending[entry.Key] = req
@@ -1167,10 +1179,11 @@ func (p *proposalShard) takeProposal(clientID uint64,
 	return nil
 }
 
-func (p *proposalShard) committed(clientID uint64, seriesID uint64, key uint64) {
+func (p *proposalShard) committed(clientID uint64, seriesID uint64, key uint64) (continueApply bool) {
 	if ps := p.borrowProposal(clientID, seriesID, key, p.getTick()); ps != nil {
-		ps.committed()
+		return ps.committed()
 	}
+	return true
 }
 
 func (p *proposalShard) dropped(clientID uint64, seriesID uint64, key uint64) {

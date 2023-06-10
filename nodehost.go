@@ -1978,6 +1978,15 @@ type INodeUser interface {
 	// in NodeHost.
 	Propose(s *client.Session,
 		cmd []byte, timeout time.Duration) (*RequestState, error)
+	// ProposeEx async propose a proposal on the Raft cluster. It allows passing
+	// a onCommit callback. The onCommit callback mustn't be blocking for too long
+	// since it is called inside the commit worker. The onCommit callback returns
+	// whether the commitWorker should pass the committed task to apply task queue
+	// so caller has the freedom to skip apply task queue if onCommit has already
+	// done all the applying job.
+	ProposeEx(s *client.Session,
+		cmd []byte, onCommit func() (continueApply bool),
+		timeout time.Duration) (*RequestState, error)
 	// ReadIndex starts the asynchronous ReadIndex protocol used for linearizable
 	// reads on the Raft shard represented by the INodeUser instance. Its
 	// semantics is the same as the ReadIndex() method in NodeHost.
@@ -2003,6 +2012,14 @@ func (nu *nodeUser) ReplicaID() uint64 {
 func (nu *nodeUser) Propose(s *client.Session,
 	cmd []byte, timeout time.Duration) (*RequestState, error) {
 	req, err := nu.node.propose(s, cmd, nu.nh.getTimeoutTick(timeout))
+	nu.setStepReady(s.ShardID)
+	return req, err
+}
+
+func (nu *nodeUser) ProposeEx(s *client.Session,
+	cmd []byte, onCommit func() (continueApply bool),
+	timeout time.Duration) (*RequestState, error) {
+	req, err := nu.node.proposeEx(s, cmd, onCommit, nu.nh.getTimeoutTick(timeout))
 	nu.setStepReady(s.ShardID)
 	return req, err
 }

@@ -443,6 +443,12 @@ func (n *node) payloadTooBig(sz int) bool {
 
 func (n *node) propose(session *client.Session,
 	cmd []byte, timeout uint64) (*RequestState, error) {
+	return n.proposeEx(session, cmd, nil, timeout)
+}
+
+func (n *node) proposeEx(session *client.Session,
+	cmd []byte, onCommit func() (continueApply bool),
+	timeout uint64) (*RequestState, error) {
 	if !n.initialized() {
 		return nil, ErrShardNotReady
 	}
@@ -455,7 +461,7 @@ func (n *node) propose(session *client.Session,
 	if n.payloadTooBig(len(cmd)) {
 		return nil, ErrPayloadTooBig
 	}
-	return n.pendingProposals.propose(session, cmd, timeout)
+	return n.pendingProposals.proposeEx(session, cmd, onCommit, timeout)
 }
 
 func (n *node) read(timeout uint64) (*RequestState, error) {
@@ -1062,19 +1068,26 @@ func (n *node) processDroppedEntries(ud pb.Update) {
 
 func (n *node) notifyCommittedEntries() {
 	tasks := n.toCommitQ.GetAll()
+	anyApplied := false
 	for _, t := range tasks {
+		continueApply := false
 		for _, e := range t.Entries {
 			if e.IsProposal() {
-				n.pendingProposals.committed(e.ClientID, e.SeriesID, e.Key)
+				if n.pendingProposals.committed(e.ClientID, e.SeriesID, e.Key) {
+					continueApply = true
+				}
 			} else if e.Type == pb.ConfigChangeEntry {
 				n.pendingConfigChange.committed(e.Key)
 			} else {
 				plog.Panicf("unknown entry type %s", e.Type)
 			}
 		}
-		n.toApplyQ.Add(t)
+		if continueApply {
+			n.toApplyQ.Add(t)
+			anyApplied = true
+		}
 	}
-	if len(tasks) > 0 {
+	if anyApplied {
 		n.applyReady()
 	}
 }

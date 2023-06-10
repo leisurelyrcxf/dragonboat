@@ -435,7 +435,7 @@ func (s *StateMachine) applyOnDisk(ss pb.Snapshot, init bool) {
 	}
 }
 
-//TODO: add test to cover the case when ReadyToStreamSnapshot returns false
+// TODO: add test to cover the case when ReadyToStreamSnapshot returns false
 
 // ReadyToStream returns a boolean flag to indicate whether the state machine
 // is ready to stream snapshot. It can not stream a full snapshot when
@@ -640,6 +640,9 @@ func (s *StateMachine) Handle(batch []Task, apply []sm.Entry) (Task, error) {
 				done = true
 			}
 		}
+	}
+	if len(batch) == 0 {
+		return Task{}, nil
 	}
 	return Task{}, s.handle(batch, apply)
 }
