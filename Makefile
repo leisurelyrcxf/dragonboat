@@ -81,11 +81,28 @@ GOBUILDTAGS="$(GOBUILDTAGVALS)"
 TESTTAGVALS+=$(GOBUILDTAGVALS)
 TESTTAGS="$(TESTTAGVALS)"
 EXTNAME=linux
+GOCMD=go build -v
 
 .PHONY: all
-all: unit-test-bin
+all: examples unit-test-bin
 .PHONY: rebuild-all
-rebuild-all: clean unit-test-bin
+rebuild-all: clean examples unit-test-bin
+examples: helloworld multigroup ondisk optimistic-write-lock
+
+helloworld:
+	$(GOCMD) -o bin/example-helloworld ${PKGROOT}/examples/helloworld
+
+multigroup:
+	$(GOCMD) -o bin/example-multigroup ${PKGROOT}/examples/multigroup
+
+ondisk:
+	$(GOCMD) -o bin/example-ondisk ${PKGROOT}/examples/ondisk
+
+optimistic-write-lock:
+	$(GOCMD) -o bin/example-optimistic-write-lock ${PKGROOT}/examples/optimistic-write-lock
+
+clean-examples:
+	@rm -f example-helloworld example-multigroup example-ondisk example-optimistic-write-lock
 
 ###############################################################################
 # tests

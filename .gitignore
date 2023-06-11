@@ -17,3 +17,6 @@ coverage.txt
 gitversion.go
 drummer-data
 nodehost-data
+**/vendor/*
+**/bin/*
+**/example-data/*
