@@ -346,6 +346,7 @@ func (l *entryLog) commitTo(index uint64) {
 			index, l.committed)
 	}
 	l.committed = index
+	plog.Errorf("Consensus reached, committed to %d", l.committed)
 }
 
 func (l *entryLog) commitUpdate(cu pb.UpdateCommit) {

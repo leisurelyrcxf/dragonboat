@@ -580,6 +580,11 @@ func (n *node) getLeaderID() (uint64, uint64, bool) {
 	return leaderInfo.leaderID, leaderInfo.term, leaderInfo.leaderID != raft.NoLeader
 }
 
+func (n *node) getLeaderIDOnly() uint64 {
+	leaderId, _, _ := n.getLeaderID()
+	return leaderId
+}
+
 func (n *node) destroy() error {
 	return n.sm.Close()
 }
@@ -1341,6 +1346,9 @@ func (n *node) recordMessage(m pb.Message) {
 	if (m.Type == pb.Heartbeat || m.Type == pb.HeartbeatResp) && m.Hint > 0 {
 		n.qs.record(pb.ReadIndex)
 	} else {
+		if m.Type != pb.Heartbeat && m.Type != pb.HeartbeatResp {
+			plog.Warningf("[node] Recv message {%s}, leaderID: %d", m.String(), n.getLeaderIDOnly())
+		}
 		n.qs.record(m.Type)
 	}
 }
