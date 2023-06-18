@@ -614,7 +614,7 @@ func createProposalsToTriggerSnapshot(t *testing.T,
 			}
 			t.Fatalf("unexpected error %v", err)
 		}
-		//time.Sleep(100 * time.Millisecond)
+		// time.Sleep(100 * time.Millisecond)
 		if err := nh.SyncCloseSession(ctx, cs); err != nil {
 			if err == ErrTimeout {
 				cancel()
@@ -1916,7 +1916,7 @@ func TestErrShardNotFoundCanBeReturned(t *testing.T) {
 				t.Errorf("failed to return ErrShardNotFound, %v", err)
 			}
 			cs := nh.GetNoOPSession(1234)
-			_, err = nh.propose(cs, make([]byte, 1), pto)
+			_, err = nh.proposeEx(cs, make([]byte, 1), nil, pto)
 			if err != ErrShardNotFound {
 				t.Errorf("failed to return ErrShardNotFound, %v", err)
 			}

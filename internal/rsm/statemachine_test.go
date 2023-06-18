@@ -98,6 +98,8 @@ func (p *testNodeProxy) ApplyUpdate(entry pb.Entry,
 	p.notifyReadClient = notifyReadClient
 }
 
+func (p *testNodeProxy) GetProposalCtxObjs([]pb.Entry) []interface{} { return nil }
+
 func (p *testNodeProxy) SetLastApplied(v uint64) {}
 
 func (p *testNodeProxy) RestoreRemotes(s pb.Snapshot) error {
@@ -2133,7 +2135,7 @@ func TestAlreadyAppliedInOnDiskSMEntryTreatedAsNoOP(t *testing.T) {
 		Index:    91,
 		Term:     6,
 	}
-	if err := sm.handleEntry(ent, false); err != nil {
+	if err := sm.handleEntry(ent, nil, false); err != nil {
 		t.Fatalf("handle entry failed %v", err)
 	}
 }
@@ -2151,7 +2153,7 @@ type testManagedStateMachine struct {
 }
 
 func (t *testManagedStateMachine) Open() (uint64, error) { return 10, nil }
-func (t *testManagedStateMachine) Update(sm.Entry) (sm.Result, error) {
+func (t *testManagedStateMachine) Update(sm.Entry, interface{}) (sm.Result, error) {
 	return sm.Result{}, nil
 }
 func (t *testManagedStateMachine) Lookup(interface{}) (interface{}, error) { return nil, nil }
@@ -2671,6 +2673,7 @@ type errorNodeProxy struct{}
 func (e *errorNodeProxy) StepReady()                                        {}
 func (e *errorNodeProxy) RestoreRemotes(pb.Snapshot) error                  { return errReturnedError }
 func (e *errorNodeProxy) ApplyUpdate(pb.Entry, sm.Result, bool, bool, bool) {}
+func (e *errorNodeProxy) GetProposalCtxObjs([]pb.Entry) []interface{}       { return nil }
 func (e *errorNodeProxy) ApplyConfigChange(pb.ConfigChange, uint64, bool) error {
 	return errReturnedError
 }

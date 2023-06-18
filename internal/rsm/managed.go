@@ -56,7 +56,7 @@ type ILoadable interface {
 // managed state machine contains a user state machine plus its engine state.
 type IManagedStateMachine interface {
 	Open() (uint64, error)
-	Update(sm.Entry) (sm.Result, error)
+	Update(entry sm.Entry, proposalCtxObj interface{}) (sm.Result, error)
 	BatchedUpdate([]sm.Entry) ([]sm.Entry, error)
 	Lookup(interface{}) (interface{}, error)
 	ConcurrentLookup(interface{}) (interface{}, error)
@@ -102,9 +102,10 @@ type NativeSM struct {
 	sm   IStateMachine
 	done <-chan struct{}
 	OffloadedStatus
-	ue     []sm.Entry
-	config config.Config
-	mu     sync.RWMutex
+	ue              []sm.Entry
+	proposalCtxObjs []interface{}
+	config          config.Config
+	mu              sync.RWMutex
 }
 
 var _ IManagedStateMachine = (*NativeSM)(nil)
@@ -116,10 +117,11 @@ var _ IRecoverable = (*NativeSM)(nil)
 func NewNativeSM(config config.Config, ism IStateMachine,
 	done <-chan struct{}) *NativeSM {
 	s := &NativeSM{
-		config: config,
-		sm:     ism,
-		done:   done,
-		ue:     make([]sm.Entry, 1),
+		config:          config,
+		sm:              ism,
+		done:            done,
+		ue:              make([]sm.Entry, 1),
+		proposalCtxObjs: make([]interface{}, 1),
 	}
 	s.OffloadedStatus.DestroyedC = make(chan struct{})
 	s.OffloadedStatus.shardID = config.ShardID
@@ -179,9 +181,14 @@ func (ds *NativeSM) Type() pb.StateMachineType {
 }
 
 // Update updates the data store.
-func (ds *NativeSM) Update(e sm.Entry) (sm.Result, error) {
+func (ds *NativeSM) Update(e sm.Entry, proposalCtxObj interface{}) (sm.Result, error) {
 	ds.ue[0] = e
-	results, err := ds.sm.Update(ds.ue)
+	var proposalCtxObjs []interface{}
+	if proposalCtxObj != nil {
+		ds.proposalCtxObjs[0] = proposalCtxObj
+		proposalCtxObjs = ds.proposalCtxObjs
+	}
+	results, err := ds.sm.Update(ds.ue, proposalCtxObjs)
 	if err != nil {
 		return sm.Result{}, err
 	}
@@ -190,13 +197,14 @@ func (ds *NativeSM) Update(e sm.Entry) (sm.Result, error) {
 	}
 	v := results[0].Result
 	ds.ue[0] = sm.Entry{}
+	ds.proposalCtxObjs[0] = nil
 	return v, nil
 }
 
 // BatchedUpdate applies committed entries in a batch to hide latency.
 func (ds *NativeSM) BatchedUpdate(ents []sm.Entry) ([]sm.Entry, error) {
 	inputLen := len(ents)
-	results, err := ds.sm.Update(ents)
+	results, err := ds.sm.Update(ents, nil)
 	if err != nil {
 		return nil, err
 	}

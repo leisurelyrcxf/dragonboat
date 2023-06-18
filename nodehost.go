@@ -804,7 +804,15 @@ func (nh *NodeHost) QueryRaftLog(shardID uint64, firstIndex uint64,
 // get the client session ready to be used in future proposals.
 func (nh *NodeHost) Propose(session *client.Session, cmd []byte,
 	timeout time.Duration) (*RequestState, error) {
-	return nh.propose(session, cmd, timeout)
+	return nh.proposeEx(session, cmd, nil, timeout)
+}
+
+// ProposeEx is similar to Propose except it allows to pass an object that is
+// associated to the request. To use This function, the state machine must
+// implement the IExtensionUpdateWithCtxObj interface.
+func (nh *NodeHost) ProposeEx(session *client.Session, cmd []byte, ctxObj interface{},
+	timeout time.Duration) (*RequestState, error) {
+	return nh.proposeEx(session, cmd, ctxObj, timeout)
 }
 
 // ProposeSession starts an asynchronous proposal on the specified shard
@@ -1389,8 +1397,8 @@ func (nh *NodeHost) getGossipInfo() GossipInfo {
 	return GossipInfo{}
 }
 
-func (nh *NodeHost) propose(s *client.Session,
-	cmd []byte, timeout time.Duration) (*RequestState, error) {
+func (nh *NodeHost) proposeEx(s *client.Session,
+	cmd []byte, ctxObj interface{}, timeout time.Duration) (*RequestState, error) {
 	if atomic.LoadInt32(&nh.closed) != 0 {
 		return nil, ErrClosed
 	}
@@ -1401,7 +1409,7 @@ func (nh *NodeHost) propose(s *client.Session,
 	if !v.supportClientSession() && !s.IsNoOPSession() {
 		panic("IOnDiskStateMachine based nodes must use NoOPSession")
 	}
-	req, err := v.propose(s, cmd, nh.getTimeoutTick(timeout))
+	req, err := v.proposeEx(s, cmd, ctxObj, nh.getTimeoutTick(timeout))
 	nh.engine.setStepReady(s.ShardID)
 	return req, err
 }
@@ -1978,6 +1986,11 @@ type INodeUser interface {
 	// in NodeHost.
 	Propose(s *client.Session,
 		cmd []byte, timeout time.Duration) (*RequestState, error)
+	// ProposeEx async propose a proposal on the Raft cluster. It allows passing
+	// a ctxObj.
+	ProposeEx(s *client.Session,
+		cmd []byte, ctxObj interface{},
+		timeout time.Duration) (*RequestState, error)
 	// ReadIndex starts the asynchronous ReadIndex protocol used for linearizable
 	// reads on the Raft shard represented by the INodeUser instance. Its
 	// semantics is the same as the ReadIndex() method in NodeHost.
@@ -2003,6 +2016,17 @@ func (nu *nodeUser) ReplicaID() uint64 {
 func (nu *nodeUser) Propose(s *client.Session,
 	cmd []byte, timeout time.Duration) (*RequestState, error) {
 	req, err := nu.node.propose(s, cmd, nu.nh.getTimeoutTick(timeout))
+	nu.setStepReady(s.ShardID)
+	return req, err
+}
+
+// ProposeEx is similar to Propose except it allows to pass an object that is
+// associated to the request. To use This function, the state machine must
+// implement the IExtensionUpdateWithCtxObj interface.
+func (nu *nodeUser) ProposeEx(s *client.Session,
+	cmd []byte, ctxObj interface{},
+	timeout time.Duration) (*RequestState, error) {
+	req, err := nu.node.proposeEx(s, cmd, ctxObj, nu.nh.getTimeoutTick(timeout))
 	nu.setStepReady(s.ShardID)
 	return req, err
 }

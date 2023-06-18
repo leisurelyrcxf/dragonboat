@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /*
-Package rsm implements State Machines used in Dragonboat.
+Package rsm implements State Machines used in dragonboat.
 
 This package is internally used by Dragonboat, applications are not expected to
 import this package.
@@ -143,8 +143,17 @@ type SMFactoryFunc func(shardID uint64,
 type INode interface {
 	StepReady()
 	RestoreRemotes(pb.Snapshot) error
-	ApplyUpdate(pb.Entry, sm.Result, bool, bool, bool)
-	ApplyConfigChange(pb.ConfigChange, uint64, bool) error
+	// ApplyUpdate notify update applying result to request.
+	// entry: the log entry
+	// result: sm result
+	// reqCtxObj: the context object related to the request corresponding
+	// to the entry, could be nil
+	// rejected: the entry is rejected
+	// ignored: the entry is ignored
+	// notifyRead: whether need notify reader
+	ApplyUpdate(entry pb.Entry, result sm.Result, rejected bool, ignored bool, notifyRead bool)
+	GetProposalCtxObjs([]pb.Entry) []interface{}
+	ApplyConfigChange(cc pb.ConfigChange, key uint64, rejected bool) error
 	ReplicaID() uint64
 	ShardID() uint64
 	ShouldStop() <-chan struct{}
@@ -435,7 +444,7 @@ func (s *StateMachine) applyOnDisk(ss pb.Snapshot, init bool) {
 	}
 }
 
-//TODO: add test to cover the case when ReadyToStreamSnapshot returns false
+// TODO: add test to cover the case when ReadyToStreamSnapshot returns false
 
 // ReadyToStream returns a boolean flag to indicate whether the state machine
 // is ready to stream snapshot. It can not stream a full snapshot when
@@ -640,6 +649,9 @@ func (s *StateMachine) Handle(batch []Task, apply []sm.Entry) (Task, error) {
 				done = true
 			}
 		}
+	}
+	if len(batch) == 0 {
+		return Task{}, nil
 	}
 	return Task{}, s.handle(batch, apply)
 }
@@ -874,6 +886,15 @@ func getEntryTypes(entries []pb.Entry) (bool, bool) {
 	return allUpdate, allNoOP
 }
 
+func areEntriesBatchable(entries []pb.Entry, proposalCtxObjs []interface{}) bool {
+	for idx, entry := range entries {
+		if !entry.IsUpdateEntry() || !entry.IsNoOPSession() || proposalCtxObjs[idx] != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *StateMachine) handle(t []Task, a []sm.Entry) error {
 	batch := batchedEntryApply && s.Concurrent()
 	for idx := range t {
@@ -883,19 +904,21 @@ func (s *StateMachine) handle(t []Task, a []sm.Entry) error {
 		// TODO: add a test for this
 		var entries []pb.Entry
 		func() {
+			// TODO(xiaofan): not sure why we need a write lock here?
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			entries = pb.EntriesToApply(t[idx].Entries, s.index, false)
 		}()
-		update, noop := getEntryTypes(entries)
-		if batch && update && noop {
+		proposalCtxObjs := s.node.GetProposalCtxObjs(entries)
+		batchable := areEntriesBatchable(entries, proposalCtxObjs)
+		if batch && batchable {
 			if err := s.handleBatch(entries, a); err != nil {
 				return err
 			}
 		} else {
 			for i := range entries {
 				last := idx == len(t)-1 && i == len(entries)-1
-				if err := s.handleEntry(entries[i], last); err != nil {
+				if err := s.handleEntry(entries[i], proposalCtxObjs[i], last); err != nil {
 					return err
 				}
 			}
@@ -932,7 +955,7 @@ func (s *StateMachine) setOnDiskIndex(first uint64, last uint64) {
 	s.onDiskIndex = last
 }
 
-func (s *StateMachine) handleEntry(e pb.Entry, last bool) error {
+func (s *StateMachine) handleEntry(e pb.Entry, proposalCtxObj interface{}, last bool) error {
 	if e.IsConfigChange() {
 		return s.configChange(e)
 	}
@@ -952,7 +975,7 @@ func (s *StateMachine) handleEntry(e pb.Entry, last bool) error {
 			s.node.ApplyUpdate(e, r, isEmptyResult(r), false, last)
 		} else {
 			if !s.entryInInitDiskSM(e.Index) {
-				r, ignored, rejected, err := s.update(e)
+				r, ignored, rejected, err := s.update(e, proposalCtxObj)
 				if err != nil {
 					return err
 				}
@@ -1054,7 +1077,7 @@ func (s *StateMachine) noop(e pb.Entry) {
 }
 
 // result is a tuple of (result, should ignore, rejected, error)
-func (s *StateMachine) update(e pb.Entry) (sm.Result, bool, bool, error) {
+func (s *StateMachine) update(e pb.Entry, proposalCtxObj interface{}) (sm.Result, bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.setApplied(e.Index, e.Term)
@@ -1065,6 +1088,9 @@ func (s *StateMachine) update(e pb.Entry) (sm.Result, bool, bool, error) {
 		if !ok {
 			// client is expected to crash
 			return sm.Result{}, false, true, nil
+		}
+		if session == nil {
+			panic("session not found")
 		}
 		s.sessions.UpdateRespondedTo(session, e.RespondedTo)
 		v, responded, toUpdate := s.sessions.UpdateRequired(session, e.SeriesID)
@@ -1078,11 +1104,6 @@ func (s *StateMachine) update(e pb.Entry) (sm.Result, bool, bool, error) {
 			// this implements the no-more-than-once update of the SM
 			return v, false, false, nil
 		}
-	}
-	if !e.IsNoOPSession() && session == nil {
-		panic("session not found")
-	}
-	if session != nil {
 		if _, ok := session.getResponse(RaftSeriesID(e.SeriesID)); ok {
 			panic("already has response in session")
 		}
@@ -1091,7 +1112,7 @@ func (s *StateMachine) update(e pb.Entry) (sm.Result, bool, bool, error) {
 	if err != nil {
 		return sm.Result{}, false, false, err
 	}
-	r, err := s.sm.Update(sm.Entry{Index: e.Index, Cmd: payload})
+	r, err := s.sm.Update(sm.Entry{Index: e.Index, Cmd: payload}, proposalCtxObj)
 	if err != nil {
 		return sm.Result{}, false, false, err
 	}

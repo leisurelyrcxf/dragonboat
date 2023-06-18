@@ -49,3 +49,16 @@ type IExtended interface {
 	// state.
 	NALookup([]byte) ([]byte, error)
 }
+
+// IExtensionUpdateWithCtxObj is an optional interface to be implemented by a user
+// state machine type, which allows proposer to associate a context object with
+// the request.
+type IExtensionUpdateWithCtxObj interface {
+	// BatchUpdateWithProposalCtxObjs is similar to
+	// IConcurrentStateMachine/IOnDiskStateMachine 's Update method,
+	// but it allows to pass a proposal context object lists.
+	BatchUpdateWithProposalCtxObjs(entries []Entry, proposalCtxObjs []interface{}) ([]Entry, error)
+	// UpdateWithProposalCtxObj is similar to IStateMachine's Update method, but
+	// it accepts a context object associated with the proposal.
+	UpdateWithProposalCtxObj(entry Entry, proposalCtxObj interface{}) (Result, error)
+}

@@ -51,8 +51,10 @@ func TestCountedWriteCanReportTotalWritten(t *testing.T) {
 
 type dummySM struct{}
 
-func (d *dummySM) Open(<-chan struct{}) (uint64, error)          { return 0, nil }
-func (d *dummySM) Update(entries []sm.Entry) ([]sm.Entry, error) { return nil, nil }
+func (d *dummySM) Open(<-chan struct{}) (uint64, error) { return 0, nil }
+func (d *dummySM) Update(entries []sm.Entry, proposalCtxObjs []interface{}) ([]sm.Entry, error) {
+	return nil, nil
+}
 func (d *dummySM) Lookup(query interface{}) (interface{}, error) { return nil, nil }
 func (d *dummySM) NALookup(query []byte) ([]byte, error)         { return nil, nil }
 func (d *dummySM) Sync() error                                   { return nil }

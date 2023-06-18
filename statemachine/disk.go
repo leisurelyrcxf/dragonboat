@@ -112,7 +112,7 @@ type IOnDiskStateMachine interface {
 	//
 	// Update returns an error when there is unrecoverable error when updating the
 	// on disk state machine.
-	Update([]Entry) ([]Entry, error)
+	Update(entries []Entry) ([]Entry, error)
 	// Lookup queries the state of the IOnDiskStateMachine instance and returns
 	// the query result as an interface{}. The input interface{} specifies what to
 	// query, it is up to the IOnDiskStateMachine implementation to interpret such

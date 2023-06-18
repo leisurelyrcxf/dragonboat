@@ -257,6 +257,14 @@ func (n *node) ApplyUpdate(e pb.Entry,
 	}
 }
 
+func (n *node) GetProposalCtxObjs(entries []pb.Entry) []interface{} {
+	result := make([]interface{}, len(entries))
+	for idx, entry := range entries {
+		result[idx] = n.pendingProposals.getProposalCtxObj(entry.ClientID, entry.SeriesID, entry.Key)
+	}
+	return result
+}
+
 func (n *node) ApplyConfigChange(cc pb.ConfigChange,
 	key uint64, rejected bool) error {
 	n.raftMu.Lock()
@@ -443,6 +451,12 @@ func (n *node) payloadTooBig(sz int) bool {
 
 func (n *node) propose(session *client.Session,
 	cmd []byte, timeout uint64) (*RequestState, error) {
+	return n.proposeEx(session, cmd, nil, timeout)
+}
+
+func (n *node) proposeEx(session *client.Session,
+	cmd []byte, ctxObj interface{},
+	timeout uint64) (*RequestState, error) {
 	if !n.initialized() {
 		return nil, ErrShardNotReady
 	}
@@ -455,7 +469,7 @@ func (n *node) propose(session *client.Session,
 	if n.payloadTooBig(len(cmd)) {
 		return nil, ErrPayloadTooBig
 	}
-	return n.pendingProposals.propose(session, cmd, timeout)
+	return n.pendingProposals.proposeEx(session, cmd, ctxObj, timeout)
 }
 
 func (n *node) read(timeout uint64) (*RequestState, error) {

@@ -1710,6 +1710,7 @@ type testDummyNodeProxy struct{}
 func (np *testDummyNodeProxy) StepReady()                                            {}
 func (np *testDummyNodeProxy) RestoreRemotes(pb.Snapshot) error                      { return nil }
 func (np *testDummyNodeProxy) ApplyUpdate(pb.Entry, sm.Result, bool, bool, bool)     {}
+func (np *testDummyNodeProxy) GetProposalCtxObjs([]pb.Entry) []interface{}           { return nil }
 func (np *testDummyNodeProxy) ApplyConfigChange(pb.ConfigChange, uint64, bool) error { return nil }
 func (np *testDummyNodeProxy) ReplicaID() uint64                                     { return 1 }
 func (np *testDummyNodeProxy) ShardID() uint64                                       { return 1 }

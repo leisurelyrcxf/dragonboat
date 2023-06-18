@@ -312,6 +312,8 @@ type RequestState struct {
 	pool         *sync.Pool
 	notifyCommit bool
 	testErr      chan struct{}
+
+	ctxObj interface{}
 }
 
 // AppliedC returns a channel of RequestResult for delivering request result.
@@ -410,6 +412,7 @@ func (r *RequestState) ResultC() chan RequestResult {
 	return r.aggrC
 }
 
+// committed return whether we should continue applying.
 func (r *RequestState) committed() {
 	if !r.notifyCommit {
 		plog.Panicf("notify commit not allowed")
@@ -498,7 +501,7 @@ func (r *RequestState) mustBeReadyForLocalRead() {
 }
 
 type proposalShard struct {
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	proposals      *entryQueue
 	pending        map[uint64]*RequestState
 	pool           *sync.Pool
@@ -524,7 +527,7 @@ func (k *keyGenerator) nextKey() uint64 {
 type pendingProposal struct {
 	shards []*proposalShard
 	keyg   []*keyGenerator
-	ps     uint64
+	ps     uint64 // number of shards
 }
 
 type readBatch struct {
@@ -1015,9 +1018,14 @@ func newPendingProposal(cfg config.Config,
 
 func (p *pendingProposal) propose(session *client.Session,
 	cmd []byte, timeoutTick uint64) (*RequestState, error) {
-	key := p.nextKey(session.ClientID)
+	return p.proposeEx(session, cmd, nil, timeoutTick)
+}
+
+func (p *pendingProposal) proposeEx(session *client.Session,
+	cmd []byte, ctxObj interface{}, timeoutTick uint64) (*RequestState, error) {
+	key := p.nextKey(session.ClientID) // TODO(xiaofan) what if the keys conflict with each other?
 	pp := p.shards[key%p.ps]
-	return pp.propose(session, cmd, key, timeoutTick)
+	return pp.propose(session, cmd, key, ctxObj, timeoutTick)
 }
 
 func (p *pendingProposal) close() {
@@ -1042,6 +1050,12 @@ func (p *pendingProposal) applied(clientID uint64,
 	seriesID uint64, key uint64, result sm.Result, rejected bool) {
 	pp := p.shards[key%p.ps]
 	pp.applied(clientID, seriesID, key, result, rejected)
+}
+
+func (p *pendingProposal) getProposalCtxObj(clientID uint64,
+	seriesID uint64, key uint64) interface{} {
+	pp := p.shards[key%p.ps]
+	return pp.getProposalCtxObj(clientID, seriesID, key, 0)
 }
 
 func (p *pendingProposal) nextKey(clientID uint64) uint64 {
@@ -1075,7 +1089,7 @@ func newPendingProposalShard(cfg config.Config,
 }
 
 func (p *proposalShard) propose(session *client.Session,
-	cmd []byte, key uint64, timeoutTick uint64) (*RequestState, error) {
+	cmd []byte, key uint64, ctxObj interface{}, timeoutTick uint64) (*RequestState, error) {
 	if timeoutTick == 0 {
 		return nil, ErrTimeoutTooSmall
 	}
@@ -1101,6 +1115,7 @@ func (p *proposalShard) propose(session *client.Session,
 	req.key = entry.Key
 	req.deadline = p.getTick() + timeoutTick
 	req.notifyCommit = p.notifyCommit
+	req.ctxObj = ctxObj
 
 	p.mu.Lock()
 	p.pending[entry.Key] = req
@@ -1140,16 +1155,6 @@ func (p *proposalShard) close() {
 
 func (p *proposalShard) getProposal(clientID uint64,
 	seriesID uint64, key uint64, now uint64) *RequestState {
-	return p.takeProposal(clientID, seriesID, key, now, true)
-}
-
-func (p *proposalShard) borrowProposal(clientID uint64,
-	seriesID uint64, key uint64, now uint64) *RequestState {
-	return p.takeProposal(clientID, seriesID, key, now, false)
-}
-
-func (p *proposalShard) takeProposal(clientID uint64,
-	seriesID uint64, key uint64, now uint64, remove bool) *RequestState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.stopped {
@@ -1158,10 +1163,40 @@ func (p *proposalShard) takeProposal(clientID uint64,
 	ps, ok := p.pending[key]
 	if ok && ps.deadline >= now {
 		if ps.clientID == clientID && ps.seriesID == seriesID {
-			if remove {
-				delete(p.pending, key)
-			}
+			delete(p.pending, key)
 			return ps
+		}
+	}
+	return nil
+}
+
+func (p *proposalShard) borrowProposal(clientID uint64,
+	seriesID uint64, key uint64, now uint64) *RequestState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.stopped {
+		return nil
+	}
+	ps, ok := p.pending[key]
+	if ok && ps.deadline >= now {
+		if ps.clientID == clientID && ps.seriesID == seriesID {
+			return ps
+		}
+	}
+	return nil
+}
+
+func (p *proposalShard) getProposalCtxObj(clientID uint64,
+	seriesID uint64, key uint64, now uint64) interface{} {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.stopped {
+		return nil
+	}
+	ps, ok := p.pending[key]
+	if ok && ps.deadline >= now {
+		if ps.clientID == clientID && ps.seriesID == seriesID {
+			return ps.ctxObj
 		}
 	}
 	return nil

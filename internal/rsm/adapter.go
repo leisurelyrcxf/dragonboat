@@ -28,7 +28,7 @@ import (
 // sm.IConcurrentStateMachine and sm.IOnDIskStateMachine instances.
 type IStateMachine interface {
 	Open(<-chan struct{}) (uint64, error)
-	Update(entries []sm.Entry) ([]sm.Entry, error)
+	Update(entries []sm.Entry, proposalCtxObjs []interface{}) ([]sm.Entry, error)
 	Lookup(query interface{}) (interface{}, error)
 	NALookup(query []byte) ([]byte, error)
 	Sync() error
@@ -71,12 +71,26 @@ func (i *InMemStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 }
 
 // Update updates the state machine.
-func (i *InMemStateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
+func (i *InMemStateMachine) Update(entries []sm.Entry, proposalCtxObjs []interface{}) ([]sm.Entry, error) {
 	if len(entries) != 1 {
 		panic("len(entries) != 1")
 	}
+	var proposalCtxObj interface{}
+	if proposalCtxObjs != nil {
+		if len(proposalCtxObjs) != 1 {
+			panic("len(entries) != 1")
+		}
+		proposalCtxObj = proposalCtxObjs[0]
+	}
 	var err error
-	entries[0].Result, err = i.sm.Update(entries[0])
+
+	if proposalCtxObj == nil {
+		entries[0].Result, err = i.sm.Update(entries[0])
+	} else if smEx, ok := i.sm.(sm.IExtensionUpdateWithCtxObj); ok {
+		entries[0].Result, err = smEx.UpdateWithProposalCtxObj(entries[0], proposalCtxObj)
+	} else {
+		panic("not implemented IExtensionUpdateWithCtxObj")
+	}
 	return entries, errors.WithStack(err)
 }
 
@@ -176,8 +190,19 @@ func (s *ConcurrentStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 }
 
 // Update updates the state machine.
-func (s *ConcurrentStateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
-	results, err := s.sm.Update(entries)
+func (s *ConcurrentStateMachine) Update(entries []sm.Entry, proposalCtxObjs []interface{}) ([]sm.Entry, error) {
+	if proposalCtxObjs == nil {
+		results, err := s.sm.Update(entries)
+		return results, errors.WithStack(err)
+	}
+	if len(proposalCtxObjs) != len(entries) {
+		panic("len(proposalCtxObjs) != len(entries)")
+	}
+	smExt, ok := s.sm.(sm.IExtensionUpdateWithCtxObj)
+	if !ok {
+		panic("needs to implement sm.IExtensionUpdateWithCtxObj to use context objects")
+	}
+	results, err := smExt.BatchUpdateWithProposalCtxObjs(entries, proposalCtxObjs)
 	return results, errors.WithStack(err)
 }
 
@@ -293,9 +318,20 @@ func (s *OnDiskStateMachine) Open(stopc <-chan struct{}) (uint64, error) {
 }
 
 // Update updates the state machine.
-func (s *OnDiskStateMachine) Update(entries []sm.Entry) ([]sm.Entry, error) {
+func (s *OnDiskStateMachine) Update(entries []sm.Entry, proposalCtxObjs []interface{}) ([]sm.Entry, error) {
 	s.ensureOpened()
-	results, err := s.sm.Update(entries)
+	if proposalCtxObjs == nil {
+		results, err := s.sm.Update(entries)
+		return results, errors.WithStack(err)
+	}
+	if len(proposalCtxObjs) != len(entries) {
+		panic("len(proposalCtxObjs) != len(entries)")
+	}
+	smExt, ok := s.sm.(sm.IExtensionUpdateWithCtxObj)
+	if !ok {
+		panic("needs to implement sm.IExtensionUpdateWithCtxObj to use context objects")
+	}
+	results, err := smExt.BatchUpdateWithProposalCtxObjs(entries, proposalCtxObjs)
 	return results, errors.WithStack(err)
 }
 
